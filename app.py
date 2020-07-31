@@ -1,10 +1,17 @@
+from operator import itemgetter
+
 import numpy as np
 from flask import Flask, request, jsonify, render_template, Response
-import joblib
 from data_transformation.dataTransformation import dataTransformation
+from trainedmodels.selectModel import modelSelection
 from flask_cors import CORS, cross_origin
-import os
+import os, joblib
 from sklearn.preprocessing import StandardScaler
+
+"""
+Developed By : Roshan Kumar Gupta
+Date: 31st July 2020
+"""
 
 app = Flask(__name__)
 os.putenv('LANG', 'en_US.UTF-8')
@@ -16,26 +23,10 @@ def home():
     return jsonify(Welcome='Welcome to Fraud detection App')
 
 
-def select_model(model_name):
-    path ="trainedmodels/"
-    if model_name == "xgb":
-        jl_file = "xgboost_jl.pkl"
-        model = joblib.load(open(path+jl_file, 'rb'))
-    elif model_name == "lda":
-        jl_file = "lda_jl.pkl"
-        model = joblib.load(open(path+jl_file, 'rb'))
-    elif model_name == "rf":
-        jl_file = "balancedrf_jl.pkl"
-        model = joblib.load(open(path+jl_file, 'rb'))
-    else:
-        return jsonify({'response': 'Invalid Model selection'})
-    return model
-
-
 def standardized_data(data):
     path = "trainedmodels/"
     ss_file = "standardscalar.pkl"
-    scalar = joblib.load(open(path+ss_file, 'rb'))
+    scalar = joblib.load(open(path + ss_file, 'rb'))
     data = scalar.transform(data)
     return data
 
@@ -49,21 +40,38 @@ def predict_api(modelname):
         if request.method == 'POST':
             response = request.get_json(force=True)
             trans = dataTransformation(response)
+
+            # selecting models
+            select_model = modelSelection(modelname)
+            model = select_model.select_model()
+            if model == "Invalid Model Selection":
+                return jsonify(status="Invalid Model Selection, Please Verify the ModelName"), 404
+
+            # encoding categorical features
             data = trans.map_categorical_data()
-            model = select_model(modelname)
+            if data == "Invalid Input":
+                return jsonify(status="Invalid input, Please check the fields"), 422
+
+            # standardizing the data
             data_curated = standardized_data([np.array(list(data.values()))])
+
+            # classifying the output
             prediction = model.predict(data_curated)
 
             if prediction[0] == 0:
+                score = round(float(model.predict_proba(data_curated)[0][0]), 3) * 100
                 status = "Fraud Not Detected"
             elif prediction[0] == 1:
+                score = round(float(model.predict_proba(data_curated)[0][1]), 3) * 100
                 status = "Fraud Detected"
 
-            score = model.predict_proba(data_curated)[0][1]
-            print(type(score))
+            feat_imp = trans.get_feat_importance(model)
+            feat_imp = dict(feat_imp[:10].values.tolist())
 
-            return jsonify(Status=status, Score=str(score) + "%")
-            #return jsonify({'status': 'Working perfectly fine'})
+            #print(dict(sorted(feat_imp.items(), key=itemgetter(1), reverse=True)[:10]))
+
+            return jsonify(status=status, confidence_Score=str(score) + "%",
+                           intepretation=dict(sorted(feat_imp.items(), key=itemgetter(1), reverse=True)[:10]))
 
     except ValueError:
         return Response("Error Occurred! %s" % ValueError)
