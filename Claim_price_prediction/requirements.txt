@@ -23,6 +23,6 @@ scipy==1.5.2
 six==1.15.0
 threadpoolctl==2.1.0
 urllib3==1.25.10
-Werkzeug==1.0.1
+Werkzeug==2.2.3
 xgboost==0.90
 yarg==0.1.9
